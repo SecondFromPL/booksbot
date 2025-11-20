@@ -13,6 +13,7 @@ class WebscrSpider(scrapy.Spider):
     }
 
     def start_requests(self):
+        # Wymagane zapytania bez site:.pl i cudzysłowów
         queries = [
             'Sklep internetowy Shoper.pl -site:shoper.pl',
             'Oprogramowanie Shoper -site:shoper.pl',
@@ -21,14 +22,13 @@ class WebscrSpider(scrapy.Spider):
         
         for query in queries:
             encoded_query = quote_plus(query)
-            # Zmieniony URL na wersję LITE
-            url = f'https://html.duckduckgo.com/lite/?q={encoded_query}'
+            # Użycie wersji LITE z wymuszonym regionem PL (&kl=pl-pl)
+            url = f'https://html.duckduckgo.com/lite/?q={encoded_query}&kl=pl-pl'
             yield scrapy.Request(url=url, callback=self.parse_duckduckgo_results)
 
     def parse_duckduckgo_results(self, response):
         
-        # Bardzo proste parsowanie dla wersji LITE: wybieramy wszystkie linki zewnętrzne
-        # Wersja LITE ma bardzo proste, nieklasowane linki
+        # Parsowanie dla wersji LITE: wybieramy wszystkie linki zewnętrzne
         result_links = response.xpath("//a[starts-with(@href, 'http')]/@href").getall()
         
         for url in result_links:
@@ -36,7 +36,7 @@ class WebscrSpider(scrapy.Spider):
             if 'duckduckgo' not in url:
                 yield scrapy.Request(url=url, callback=self.verify_shoper, meta={'handle_httpstatus_list': [403, 404, 500]})
 
-        # Paginacja dla wersji LITE (szukamy "Next" lub "Następne")
+        # Paginacja dla wersji LITE
         next_page = response.xpath("//a[contains(text(), 'Next') or contains(text(), 'Następne')]/@href").get()
         
         if next_page:
@@ -69,4 +69,3 @@ class WebscrSpider(scrapy.Spider):
                 'generator': generator,
                 'detected': True
             }
-            
