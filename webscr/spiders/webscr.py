@@ -21,24 +21,23 @@ class WebscrSpider(scrapy.Spider):
         
         for query in queries:
             encoded_query = quote_plus(query)
-            url = f'https://html.duckduckgo.com/html/?q={encoded_query}'
+            # Zmieniony URL na wersję LITE
+            url = f'https://html.duckduckgo.com/lite/?q={encoded_query}'
             yield scrapy.Request(url=url, callback=self.parse_duckduckgo_results)
 
     def parse_duckduckgo_results(self, response):
         
-        # 1. Próba za pomocą selektora CSS (często stabilniejsza)
-        result_links = response.css('#links .result__url::attr(href)').getall()
+        # Bardzo proste parsowanie dla wersji LITE: wybieramy wszystkie linki zewnętrzne
+        # Wersja LITE ma bardzo proste, nieklasowane linki
+        result_links = response.xpath("//a[starts-with(@href, 'http')]/@href").getall()
         
-        # 2. Jeśli CSS zawiedzie, próba za pomocą XPath (łącząca różne znane struktury)
-        if not result_links:
-             result_links = response.xpath("//div[contains(@class, 'result')]//h2/a/@href").getall()
-
         for url in result_links:
-            if url.startswith('http') and 'duckduckgo' not in url:
+            # Filtrowanie linków wewnętrznych DDG
+            if 'duckduckgo' not in url:
                 yield scrapy.Request(url=url, callback=self.verify_shoper, meta={'handle_httpstatus_list': [403, 404, 500]})
 
-        # Paginacja
-        next_page = response.xpath("//div[@id='content_bottom']//a[contains(text(), 'Next')]/@href").get()
+        # Paginacja dla wersji LITE (szukamy "Next" lub "Następne")
+        next_page = response.xpath("//a[contains(text(), 'Next') or contains(text(), 'Następne')]/@href").get()
         
         if next_page:
             yield response.follow(next_page, callback=self.parse_duckduckgo_results)
@@ -70,3 +69,4 @@ class WebscrSpider(scrapy.Spider):
                 'generator': generator,
                 'detected': True
             }
+            
