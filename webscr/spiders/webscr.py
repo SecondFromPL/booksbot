@@ -2,7 +2,6 @@ import scrapy
 from urllib.parse import urlparse, parse_qs, quote_plus
 import logging
 
-
 class WebscrSpider(scrapy.Spider):
     name = 'webscr'
     allowed_domains = []
@@ -41,7 +40,6 @@ class WebscrSpider(scrapy.Spider):
             with open(filename, 'wb') as f:
                 f.write(response.body)
             logging.info(f"ZAPISANO HTML LOKALNIE: Strona wyników zapisana do {filename}")
-
         # Parsowanie dla wersji LITE
         result_links = response.xpath("//a[starts-with(@href, 'http')]/@href").getall()
 
@@ -88,5 +86,7 @@ class WebscrSpider(scrapy.Spider):
                 'generator': generator,
                 'detected': True
             }
+        
+        logging.info(f"WERYFIKACJA: Zakończono sprawdzanie: {response.url}")
 
         logging.info(f"WERYFIKACJA: Zakończono sprawdzanie: {response.url}")
