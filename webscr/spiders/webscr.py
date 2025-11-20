@@ -134,15 +134,124 @@ class WebscrSpider(scrapy.Spider):
                     break
 
         if is_shoper:
-            logging.info(f"!!! ZNALEZIONO SKLEP: {response.url}")
-            yield {
-                'url': response.url,
-                'title': response.css('title::text').get(),
-                'generator': generator,
-                'detected': True
-            }
+            # Detekcja 'tpay' na stronie głównej
+            tpay_home = 'tpay' in (response.text or '').lower()
+
+            # Spróbuj znaleźć link do strony o metodach płatności
+            payment_href = self.find_payment_link(response)
+            if payment_href:
+                payment_url = response.urljoin(payment_href)
+                logging.info(f"TPAY: Znaleziono potencjalną stronę płatności: {payment_url}. Sprawdzam 'tpay'.")
+                # Przejdź do strony płatności i połącz wyniki (OR)
+                yield scrapy.Request(
+                    url=payment_url,
+                    callback=self.check_payment_page_for_tpay,
+                    meta={
+                        'handle_httpstatus_all': True,
+                        'tpay_found_home': tpay_home,
+                        'shop_url': response.url,
+                        'shop_title': response.css('title::text').get(),
+                        'generator': generator,
+                    },
+                    errback=self.on_payment_error,
+                )
+            else:
+                logging.info("TPAY: Nie znaleziono linku do strony płatności – używam wyniku ze strony głównej.")
+                yield {
+                    'url': response.url,
+                    'title': response.css('title::text').get(),
+                    'generator': generator,
+                    'detected': True,
+                    'tPay found': bool(tpay_home),
+                }
         
         logging.info(f"WERYFIKACJA: Zakończono sprawdzanie: {response.url}")
+
+    # --- Pomocnicze: wyszukiwanie linku do strony płatności ---
+    def find_payment_link(self, response):
+        """
+        Szuka odnośnika prowadzącego do informacji o metodach płatności.
+        Zwraca href (może być względny) lub None.
+        """
+        # Szukanie po atrybucie href – najczęstsze wzorce (z i bez polskich znaków)
+        href_candidates = response.xpath(
+            "//a["
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'platnosc') or "
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'platnosci') or "
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'platnos') or "
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'payments') or "
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'payment') or "
+            "contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'pay')"
+            "]/@href"
+        ).getall() or []
+
+        # Szukanie po tekście linku (również ogólne sekcje jak „Płatność i dostawa”)
+        text_candidates = response.xpath(
+            "//a["
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'metody płatności') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'formy płatności') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'sposoby płatności') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'płatno') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'platno') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'płatność i dostawa') or "
+            "contains(translate(normalize-space(string(.)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'platnosc i dostawa')"
+            "]/@href"
+        ).getall() or []
+
+        # Połącz i zuniikuj, zachowując kolejność
+        seen = set()
+        for href in href_candidates + text_candidates:
+            if not href:
+                continue
+            if href.startswith('#'):
+                continue
+            if href not in seen:
+                seen.add(href)
+                return href
+        return None
+
+    def check_payment_page_for_tpay(self, response):
+        """Callback: sprawdza występowanie 'tpay' na stronie metod płatności i zwraca item."""
+        tpay_home = bool(response.meta.get('tpay_found_home', False))
+        tpay_payment = 'tpay' in (response.text or '').lower()
+        combined = tpay_home or tpay_payment
+
+        logging.info(
+            f"TPAY: Wynik: home={tpay_home}, payment={tpay_payment}, combined={combined} | {response.url}"
+        )
+
+        yield {
+            'url': response.meta.get('shop_url', response.url),
+            'title': response.meta.get('shop_title'),
+            'generator': response.meta.get('generator'),
+            'detected': True,
+            'tPay found': bool(combined),
+        }
+
+    def on_payment_error(self, failure):
+        """
+        Specjalny errback dla strony płatności – na błąd i tak zwróć item
+        z wartością opartą o stronę główną.
+        """
+        try:
+            req = getattr(failure, 'request', None)
+            meta = req.meta if req is not None else {}
+            url = req.url if req is not None else 'UNKNOWN_URL'
+        except Exception:
+            meta = {}
+            url = 'UNKNOWN_URL'
+
+        logging.warning(
+            f"BŁĄD POBIERANIA STRONY PŁATNOŚCI: {failure.getErrorMessage() if hasattr(failure, 'getErrorMessage') else failure} | URL: {url}. Zwracam item z wynikiem z homepage."
+        )
+
+        yield {
+            'url': meta.get('shop_url', url),
+            'title': meta.get('shop_title'),
+            'generator': meta.get('generator'),
+            'detected': True,
+            'tPay found': bool(meta.get('tpay_found_home', False)),
+        }
 
     def on_request_error(self, failure):
         """
