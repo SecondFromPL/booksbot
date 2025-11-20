@@ -2,8 +2,8 @@
 import scrapy
 
 
-class BooksSpider(scrapy.Spider):
-    name = "books"
+class WebscrSpider(scrapy.Spider):
+    name = "webscr"
     allowed_domains = ["books.toscrape.com"]
     start_urls = [
         'http://books.toscrape.com/',
