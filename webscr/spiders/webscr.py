@@ -14,9 +14,9 @@ class WebscrSpider(scrapy.Spider):
 
     def start_requests(self):
         queries = [
-            'site:.pl "Sklep internetowy Shoper"',
-            'site:.pl "Oprogramowanie Shoper"',
-            'site:.pl "Powered by Shoper"'
+            'site:.pl -site:shoper.pl "Sklep internetowy Shoper"',
+            'site:.pl -site:shoper.pl "Oprogramowanie Shoper"',
+            'site:.pl -site:shoper.pl "Powered by Shoper"'
         ]
         
         for query in queries:
@@ -24,14 +24,16 @@ class WebscrSpider(scrapy.Spider):
             url = f'https://html.duckduckgo.com/html/?q={encoded_query}'
             yield scrapy.Request(url=url, callback=self.parse_duckduckgo_results)
 
-    def parse_duckduckgo_results(self, response):
+   def parse_duckduckgo_results(self, response):
         
-        result_links = response.css('.result__url::attr(href)').getall()
+        # Nowa, bardziej robustna selekcja linków wyników przy użyciu XPath
+        result_links = response.xpath("//div[@class='result']//a[@class='result__url']/@href").getall()
         
         for url in result_links:
             if url.startswith('http') and 'duckduckgo' not in url:
                 yield scrapy.Request(url=url, callback=self.verify_shoper, meta={'handle_httpstatus_list': [403, 404, 500]})
 
+        # Paginacja pozostaje bez zmian
         next_page = response.xpath("//div[@id='content_bottom']//a[contains(text(), 'Next')]/@href").get()
         
         if next_page:
