@@ -26,12 +26,18 @@ class WebscrSpider(scrapy.Spider):
 
     def parse_duckduckgo_results(self, response):
         
-        result_links = response.xpath("//div[@class='result']//a[@class='result__url']/@href").getall()
+        # 1. Próba za pomocą selektora CSS (często stabilniejsza)
+        result_links = response.css('#links .result__url::attr(href)').getall()
         
+        # 2. Jeśli CSS zawiedzie, próba za pomocą XPath (łącząca różne znane struktury)
+        if not result_links:
+             result_links = response.xpath("//div[contains(@class, 'result')]//h2/a/@href").getall()
+
         for url in result_links:
             if url.startswith('http') and 'duckduckgo' not in url:
                 yield scrapy.Request(url=url, callback=self.verify_shoper, meta={'handle_httpstatus_list': [403, 404, 500]})
 
+        # Paginacja
         next_page = response.xpath("//div[@id='content_bottom']//a[contains(text(), 'Next')]/@href").get()
         
         if next_page:
