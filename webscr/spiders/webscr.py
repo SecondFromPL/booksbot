@@ -24,9 +24,12 @@ class WebscrSpider(scrapy.Spider):
             yield scrapy.Request(url=url, callback=self.parse_google_results)
 
     def parse_google_results(self, response):
-        links = response.css('a::attr(href)').getall()
+        result_links = response.xpath('//div[@class="g"]//a/@href').getall()
         
-        for link in links:
+        if not result_links:
+            result_links = response.xpath('//div[contains(@class, "yuRUbf")]/a/@href').getall()
+            
+        for link in result_links:
             url = link
             
             if '/url?q=' in link:
@@ -40,7 +43,7 @@ class WebscrSpider(scrapy.Spider):
         next_page = response.css('a#pnnext::attr(href)').get()
         if next_page:
             yield response.follow(next_page, callback=self.parse_google_results)
-
+            
     def verify_shoper(self, response):
         is_shoper = False
         
