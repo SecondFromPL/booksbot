@@ -1,5 +1,5 @@
 import logging
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, parse_qs, unquote
 
 import scrapy
 
@@ -53,16 +53,62 @@ class WebscrSpider(scrapy.Spider):
             except Exception as e:
                 logging.warning(
                     f"NIE UDAŁO SIĘ ZAPISAĆ LOKALNIE: {e}. Kontynuuję bez zapisu pliku.")
-        # Parsowanie dla wersji LITE
-        result_links = response.xpath("//a[starts-with(@href, 'http')]/@href").getall()
+        # Parsowanie linków wyników (DuckDuckGo Lite używa przekierowań /l/?uddg=...)
+        raw_links = response.xpath(
+            "//a[contains(@class, 'result-link')]/@href | "
+            "//a[contains(@href, '/l/?uddg=')]/@href | "
+            "//a[starts-with(@href, 'http')]/@href"
+        ).getall()
 
-        logging.info(f"PARSOWANIE: Znaleziono {len(result_links)} potencjalnych linków na stronie wyników.")
+        unique_targets = []
+        seen = set()
 
-        for url in result_links:
-            if 'duckduckgo' not in url:
-                logging.info(f"LINK ZEWNĘTRZNY: Przechodzę do weryfikacji: {url}")
-                yield scrapy.Request(url=url, callback=self.verify_shoper,
-                                     meta={'handle_httpstatus_list': [403, 404, 500]})
+        for href in raw_links:
+            if not href:
+                continue
+            # Uzupełnij schemat dla linków zaczynających się od '//'
+            if href.startswith('//'):
+                href = 'https:' + href
+
+            # Pomijamy nie-HTTP(S)
+            if not (href.startswith('http://') or href.startswith('https://')):
+                continue
+
+            parsed = urlparse(href)
+
+            # Linki DDG typu /l/?uddg=... – wyciągamy link docelowy
+            if parsed.netloc.endswith('duckduckgo.com') and parsed.path.startswith('/l'):
+                qs = parse_qs(parsed.query)
+                target = qs.get('uddg', [None])[0]
+                if not target:
+                    continue
+                target = unquote(target)
+                if target.startswith('//'):
+                    target = 'https:' + target
+                if not (target.startswith('http://') or target.startswith('https://')):
+                    continue
+                final_url = target
+            else:
+                # Pomijamy inne wewnętrzne linki DDG
+                if 'duckduckgo.com' in parsed.netloc:
+                    continue
+                final_url = href
+
+            if final_url not in seen:
+                seen.add(final_url)
+                unique_targets.append(final_url)
+
+        logging.info(
+            f"PARSOWANIE: Surowe linki={len(raw_links)}, unikalne cele={len(unique_targets)}."
+        )
+
+        for url in unique_targets:
+            logging.info(f"LINK ZEWNĘTRZNY: Przechodzę do weryfikacji: {url}")
+            yield scrapy.Request(
+                url=url,
+                callback=self.verify_shoper,
+                meta={'handle_httpstatus_list': [403, 404, 500]}
+            )
 
         # Paginacja dla wersji LITE
         next_page = response.xpath("//a[contains(text(), 'Next') or contains(text(), 'Następne')]/@href").get()
