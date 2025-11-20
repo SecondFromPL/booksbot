@@ -14,9 +14,9 @@ class WebscrSpider(scrapy.Spider):
 
     def start_requests(self):
         queries = [
-            'site:.pl "Sklep internetowy Shoper"',
-            'site:.pl "Oprogramowanie Shoper"',
-            'site:.pl "Powered by Shoper"'
+            'site:.pl -inurl:shoper.pl "Sklep internetowy Shoper"',
+            'site:.pl -inurl:shoper.pl "Oprogramowanie Shoper"',
+            'site:.pl -inurl:shoper.pl "Powered by Shoper"'
         ]
         
         for query in queries:
