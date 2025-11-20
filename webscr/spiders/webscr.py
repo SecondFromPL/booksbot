@@ -1,6 +1,8 @@
-import scrapy
-from urllib.parse import urlparse, parse_qs, quote_plus
 import logging
+from urllib.parse import quote_plus
+
+import scrapy
+
 
 class WebscrSpider(scrapy.Spider):
     name = 'webscr'
@@ -28,18 +30,29 @@ class WebscrSpider(scrapy.Spider):
 
     def parse_duckduckgo_results(self, response):
 
-        # ZAPIS HTML DLA ZYTE CLOUD
+        # ZAPIS HTML DLA ZYTE CLOUD (bezpieczny, nie powoduje błędów gdy 'job' nie istnieje)
         filename = f'ddg_lite_results_{response.url.split("q=")[-1].split("&")[0]}.html'
 
-        try:
-            # Użycie Job's Files API do zapisu pliku w Zyte Cloud
-            response.meta['job'].save_content(response.body, filename)
-            logging.info(f"ZAPISANO HTML: Strona wyników DuckDuckGo zapisana jako {filename} w Job's Files.")
-        except AttributeError:
-            # Rezerwowy zapis do lokalnego systemu plików
-            with open(filename, 'wb') as f:
-                f.write(response.body)
-            logging.info(f"ZAPISANO HTML LOKALNIE: Strona wyników zapisana do {filename}")
+        job = response.meta.get('job')
+        if job and hasattr(job, 'save_content'):
+            try:
+                job.save_content(response.body, filename)
+                logging.info(
+                    f"ZAPISANO HTML: Strona wyników DuckDuckGo zapisana jako {filename} w Job's Files.")
+            except Exception as e:
+                # W środowisku lokalnym lub gdy API jest niedostępne – ignoruj błąd i przejdź dalej
+                logging.warning(
+                    f"NIE UDAŁO SIĘ ZAPISAĆ DO JOB FILES: {e}. Kontynuuję bez zapisu w Zyte.")
+        else:
+            # Fallback do lokalnego systemu plików (może być ignorowany w środowisku Zyte)
+            try:
+                with open(filename, 'wb') as f:
+                    f.write(response.body)
+                logging.info(
+                    f"ZAPISANO HTML LOKALNIE: Strona wyników zapisana do {filename}")
+            except Exception as e:
+                logging.warning(
+                    f"NIE UDAŁO SIĘ ZAPISAĆ LOKALNIE: {e}. Kontynuuję bez zapisu pliku.")
         # Parsowanie dla wersji LITE
         result_links = response.xpath("//a[starts-with(@href, 'http')]/@href").getall()
 
@@ -87,6 +100,4 @@ class WebscrSpider(scrapy.Spider):
                 'detected': True
             }
         
-        logging.info(f"WERYFIKACJA: Zakończono sprawdzanie: {response.url}")
-
         logging.info(f"WERYFIKACJA: Zakończono sprawdzanie: {response.url}")
