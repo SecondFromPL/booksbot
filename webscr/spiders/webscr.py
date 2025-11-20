@@ -5,7 +5,7 @@ class WebscrSpider(scrapy.Spider):
     name = 'webscr'
     allowed_domains = []
     
-    custom_settings = {
+   custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 2,
         'COOKIES_ENABLED': False,
@@ -14,14 +14,20 @@ class WebscrSpider(scrapy.Spider):
 
     def start_requests(self):
         queries = [
-            'site:.pl -inurl:shoper.pl "Sklep internetowy Shoper"',
-            'site:.pl -inurl:shoper.pl "Oprogramowanie Shoper"',
-            'site:.pl -inurl:shoper.pl "Powered by Shoper"'
+            'site:.pl "Sklep internetowy Shoper"',
+            'site:.pl "Oprogramowanie Shoper"',
+            'site:.pl "Powered by Shoper"'
         ]
         
         for query in queries:
             url = f'https://www.google.com/search?q={query}'
-            yield scrapy.Request(url=url, callback=self.parse_google_results)
+            yield scrapy.Request(
+                url=url, 
+                callback=self.parse_google_results, 
+                headers={
+                    'X-SmartProxy-User-Agent': 'desktop_chrome'
+                }
+            )
 
     def parse_google_results(self, response):
         result_links = response.xpath('//div[@class="g"]//a/@href').getall()
