@@ -1,30 +1,70 @@
-# -*- coding: utf-8 -*-
 import scrapy
-
+from urllib.parse import urlparse, parse_qs
 
 class WebscrSpider(scrapy.Spider):
-    name = "webscr"
-    allowed_domains = ["books.toscrape.com"]
-    start_urls = [
-        'http://books.toscrape.com/',
-    ]
+    name = 'webscr'
+    allowed_domains = []
+    
+    custom_settings = {
+        'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_DELAY': 2,
+        'COOKIES_ENABLED': False,
+        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    }
 
-    def parse(self, response):
-        for book_url in response.css("article.product_pod > h3 > a ::attr(href)").extract():
-            yield scrapy.Request(response.urljoin(book_url), callback=self.parse_book_page)
-        next_page = response.css("li.next > a ::attr(href)").extract_first()
+    def start_requests(self):
+        queries = [
+            'site:.pl "Sklep internetowy Shoper"',
+            'site:.pl "Oprogramowanie Shoper"',
+            'site:.pl "Powered by Shoper"'
+        ]
+        
+        for query in queries:
+            url = f'https://www.google.com/search?q={query}'
+            yield scrapy.Request(url=url, callback=self.parse_google_results)
+
+    def parse_google_results(self, response):
+        links = response.css('a::attr(href)').getall()
+        
+        for link in links:
+            url = link
+            
+            if '/url?q=' in link:
+                parsed = parse_qs(urlparse(link).query)
+                if 'q' in parsed:
+                    url = parsed['q'][0]
+            
+            if url.startswith('http') and 'google' not in url:
+                yield scrapy.Request(url=url, callback=self.verify_shoper, meta={'handle_httpstatus_list': [403, 404, 500]})
+
+        next_page = response.css('a#pnnext::attr(href)').get()
         if next_page:
-            yield scrapy.Request(response.urljoin(next_page), callback=self.parse)
+            yield response.follow(next_page, callback=self.parse_google_results)
 
-    def parse_book_page(self, response):
-        item = {}
-        product = response.css("div.product_main")
-        item["title"] = product.css("h1 ::text").extract_first()
-        item['category'] = response.xpath(
-            "//ul[@class='breadcrumb']/li[@class='active']/preceding-sibling::li[1]/a/text()"
-        ).extract_first()
-        item['description'] = response.xpath(
-            "//div[@id='product_description']/following-sibling::p/text()"
-        ).extract_first()
-        item['price'] = response.css('p.price_color ::text').extract_first()
-        yield item
+    def verify_shoper(self, response):
+        is_shoper = False
+        
+        generator = response.xpath('//meta[@name="generator"]/@content').get()
+        if generator and 'shoper' in generator.lower():
+            is_shoper = True
+            
+        if not is_shoper:
+            footer_text = response.xpath('//footer//text()').getall()
+            footer_content = " ".join(footer_text).lower()
+            if 'shoper.pl' in footer_content or 'oprogramowanie shoper' in footer_content:
+                is_shoper = True
+        
+        if not is_shoper:
+            scripts = response.xpath('//script/@src').getall()
+            for script in scripts:
+                if 'shoper' in script.lower():
+                    is_shoper = True
+                    break
+
+        if is_shoper:
+            yield {
+                'url': response.url,
+                'title': response.css('title::text').get(),
+                'generator': generator,
+                'detected': True
+            }
