@@ -92,26 +92,43 @@ class WebscrSpider(scrapy.Spider):
             )
 
         # Paginacja dla wersji LITE
-        next_page = response.xpath("//a[contains(text(), 'Next') or contains(text(), 'Następne')]/@href").get()
+        # 1) Priorytet: użyj formularza z klasą next_form, który zawiera wszystkie parametry następnej strony
+        try:
+            next_form_request = scrapy.FormRequest.from_response(
+                response,
+                formxpath="//form[contains(concat(' ', normalize-space(@class), ' '), ' next_form ')]",
+                callback=self.parse_duckduckgo_results,
+                errback=self.on_request_error,
+                meta={'handle_httpstatus_all': True},
+            )
+            logging.info("PAGINACJA: Używam formularza next_form do przejścia na kolejną stronę.")
+            yield next_form_request
+            return
+        except Exception as e:
+            logging.debug(f"PAGINACJA: Formularz next_form nie znaleziony lub nieobsługiwalny: {e}")
 
+        # 2) Fallback: szukaj klasycznego linku <a> z tekstem Next/Następne
+        next_page = response.xpath("//a[contains(text(), 'Next') or contains(text(), 'Następne')]/@href").get()
         if next_page:
             logging.info("PAGINACJA: Znaleziono link do następnej strony, kontynuuję.")
             yield response.follow(next_page, callback=self.parse_duckduckgo_results)
-        else:
-            # Fallback: DDG Lite czasem używa przycisku formularza "Next Page >" zamiast linku <a>
-            try:
-                form_request = scrapy.FormRequest.from_response(
-                    response,
-                    formxpath="//form[.//input[@type='submit' and contains(@class, 'navbutton') and (contains(@value, 'Next') or contains(@value, 'Następ'))]]",
-                    clickdata={'type': 'submit', 'class': 'navbutton'},
-                    callback=self.parse_duckduckgo_results,
-                    errback=self.on_request_error,
-                )
-                logging.info("PAGINACJA: Brak linku <a>. Używam wysłania formularza (przycisk 'Next').")
-                yield form_request
-            except Exception as e:
-                logging.info(
-                    f"PAGINACJA: Nie znaleziono możliwości przejścia dalej (brak <a> i formularza). Szczegóły: {e}")
+            return
+
+        # 3) Ostateczny fallback: DDG Lite bywa z przyciskiem formularza "Next Page >"
+        try:
+            form_request = scrapy.FormRequest.from_response(
+                response,
+                formxpath="//form[.//input[@type='submit' and contains(@class, 'navbutton') and (contains(@value, 'Next') or contains(@value, 'Następ'))]]",
+                clickdata={'type': 'submit', 'class': 'navbutton'},
+                callback=self.parse_duckduckgo_results,
+                errback=self.on_request_error,
+                meta={'handle_httpstatus_all': True},
+            )
+            logging.info("PAGINACJA: Brak linku <a>. Używam wysłania formularza (przycisk 'Next').")
+            yield form_request
+        except Exception as e:
+            logging.info(
+                f"PAGINACJA: Nie znaleziono możliwości przejścia dalej (brak next_form, <a> i formularza z przyciskiem). Szczegóły: {e}")
 
     def verify_shoper(self, response):
         is_shoper = False
